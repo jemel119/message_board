@@ -2,9 +2,13 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
     match /users/{uid} {
       function owner() {
-        return request.auth != null && request.auth.uid == uid;
+        return signedIn() && request.auth.uid == uid;
       }
 
       function validUserRecord() {
@@ -40,6 +44,71 @@ service cloud.firestore {
       allow get: if owner();
       allow create: if owner() && validUserRecord();
       allow list, update, delete: if false;
+    }
+
+    match /messages/{messageId} {
+      function validText(text) {
+        return text is string
+          && text.size() >= 1
+          && text.size() <= 1000
+          && text.matches('[\\s\\S]*[^\\s][\\s\\S]*');
+      }
+
+      function validAuthorName(name) {
+        let profile = get(
+          /databases/$(database)/documents/users/$(request.auth.uid)
+        ).data;
+        return name is string
+          && name == profile.firstName + ' ' + profile.lastName;
+      }
+
+      function validNewMessage() {
+        let d = request.resource.data;
+        return d.keys().hasAll([
+            'schemaVersion',
+            'text',
+            'authorUid',
+            'authorName',
+            'createdAt',
+            'editedAt'
+          ])
+          && d.keys().hasOnly([
+            'schemaVersion',
+            'text',
+            'authorUid',
+            'authorName',
+            'createdAt',
+            'editedAt'
+          ])
+          && d.schemaVersion is int
+          && d.schemaVersion == 2
+          && validText(d.text)
+          && d.authorUid == request.auth.uid
+          && validAuthorName(d.authorName)
+          && d.createdAt is timestamp
+          && d.createdAt == request.time
+          && d.editedAt == null;
+      }
+
+      function author() {
+        return signedIn()
+          && resource.data.authorUid == request.auth.uid;
+      }
+
+      function validEdit() {
+        let d = request.resource.data;
+        return d.diff(resource.data).affectedKeys()
+            .hasOnly(['text', 'editedAt'])
+          && d.schemaVersion == 2
+          && validText(d.text)
+          && d.editedAt is timestamp
+          && d.editedAt == request.time;
+      }
+
+      allow read: if signedIn();
+      allow create: if signedIn() && validNewMessage();
+      allow update: if author() && validEdit();
+      allow delete: if author();
     }
   }
 }
