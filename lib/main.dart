@@ -1,6 +1,9 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 
+import 'auth_gate.dart';
+import 'auth_service.dart';
 import 'firebase_options.dart';
 
 void main() {
@@ -33,7 +36,7 @@ class FirebaseStartup extends StatefulWidget {
 }
 
 class _FirebaseStartupState extends State<FirebaseStartup> {
-  late Future<void> _initialization;
+  late Future<AuthService> _initialization;
 
   @override
   void initState() {
@@ -41,21 +44,20 @@ class _FirebaseStartupState extends State<FirebaseStartup> {
     _initialization = _initialize();
   }
 
-  Future<void> _initialize() async {
+  Future<AuthService> _initialize() async {
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
     );
+    return AuthService(FirebaseAuth.instance);
   }
 
   void _retry() {
-    setState(() {
-      _initialization = _initialize();
-    });
+    setState(() => _initialization = _initialize());
   }
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<void>(
+    return FutureBuilder<AuthService>(
       future: _initialization,
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) {
@@ -97,13 +99,7 @@ class _FirebaseStartupState extends State<FirebaseStartup> {
           );
         }
 
-        return const Scaffold(
-          body: SafeArea(
-            child: Center(
-              child: Text('Firebase is ready. Authentication is next.'),
-            ),
-          ),
-        );
+        return AuthGate(auth: snapshot.requireData);
       },
     );
   }
