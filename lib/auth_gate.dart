@@ -28,7 +28,7 @@ class AuthGate extends StatelessWidget {
         final user = snapshot.data;
         if (user == null) return LoginScreen(auth: auth);
 
-        return SignedInScreen(key: ValueKey(user.uid), auth: auth, user: user);
+        return ProfileGate(key: ValueKey(user.uid), auth: auth, user: user);
       },
     );
   }
@@ -47,7 +47,9 @@ class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _email = TextEditingController();
   final _password = TextEditingController();
+  final _confirmation = TextEditingController();
 
+  bool _registering = false;
   bool _submitting = false;
   String? _error;
 
@@ -55,10 +57,23 @@ class _LoginScreenState extends State<LoginScreen> {
   void dispose() {
     _email.dispose();
     _password.dispose();
+    _confirmation.dispose();
     super.dispose();
   }
 
-  Future<void> _signIn() async {
+  void _switchMode() {
+    if (_submitting) return;
+
+    setState(() {
+      _registering = !_registering;
+      _error = null;
+      _password.clear();
+      _confirmation.clear();
+      _formKey.currentState?.reset();
+    });
+  }
+
+  Future<void> _submit() async {
     if (_submitting || !_formKey.currentState!.validate()) return;
 
     setState(() {
@@ -67,7 +82,14 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     try {
-      await widget.auth.signIn(email: _email.text, password: _password.text);
+      if (_registering) {
+        await widget.auth.register(
+          email: _email.text,
+          password: _password.text,
+        );
+      } else {
+        await widget.auth.signIn(email: _email.text, password: _password.text);
+      }
     } on FirebaseAuthException catch (error) {
       if (!mounted) return;
 
@@ -77,14 +99,18 @@ class _LoginScreenState extends State<LoginScreen> {
             'Could not connect. Check your connection and try again.',
           'too-many-requests' => 'Too many attempts. Wait before trying again.',
           'invalid-email' => 'Enter a valid email address.',
+          'weak-password' => 'Choose a stronger password.',
+          'email-already-in-use' => 'Registration could not finish. Try signing in or use another email.',
           'invalid-credential' || 'wrong-password' || 'user-not-found' =>
             'Unable to sign in. Check your email and password.',
-          _ => 'Sign-in is unavailable. Please try again.',
+          _ => 'Authentication is unavailable. Please try again.',
         };
       });
     } catch (_) {
       if (!mounted) return;
-      setState(() => _error = 'Sign-in is unavailable. Please try again.');
+      setState(() {
+        _error = 'Authentication is unavailable. Please try again.';
+      });
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
@@ -93,7 +119,7 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Sign in')),
+      appBar: AppBar(title: Text(_registering ? 'Create account' : 'Sign in')),
       body: SafeArea(
         child: Form(
           key: _formKey,
@@ -126,11 +152,41 @@ class _LoginScreenState extends State<LoginScreen> {
                 autocorrect: false,
                 enableSuggestions: false,
                 decoration: const InputDecoration(labelText: 'Password'),
-                validator: (value) => value == null || value.isEmpty
-                    ? 'Enter your password.'
-                    : null,
-                onFieldSubmitted: (_) => _signIn(),
+                validator: (value) {
+                  if (value == null || value.isEmpty) {
+                    return 'Enter your password.';
+                  }
+                  if (_registering && value.length < 6) {
+                    return 'Use at least 6 characters.';
+                  }
+                  return null;
+                },
+                onFieldSubmitted: (_) {
+                  if (!_registering) _submit();
+                },
               ),
+              if (_registering) ...[
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: _confirmation,
+                  enabled: !_submitting,
+                  obscureText: true,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  decoration: const InputDecoration(
+                    labelText: 'Confirm password',
+                  ),
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'Confirm your password.';
+                    }
+                    return value == _password.text
+                        ? null
+                        : 'Passwords must match.';
+                  },
+                  onFieldSubmitted: (_) => _submit(),
+                ),
+              ],
               if (_error case final message?)
                 Padding(
                   padding: const EdgeInsets.only(top: 16),
@@ -146,8 +202,22 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
               const SizedBox(height: 24),
               FilledButton(
-                onPressed: _submitting ? null : _signIn,
-                child: Text(_submitting ? 'Signing in…' : 'Sign in'),
+                onPressed: _submitting ? null : _submit,
+                child: Text(
+                  _submitting
+                      ? 'Please wait…'
+                      : _registering
+                      ? 'Create account'
+                      : 'Sign in',
+                ),
+              ),
+              TextButton(
+                onPressed: _submitting ? null : _switchMode,
+                child: Text(
+                  _registering
+                      ? 'Already registered? Sign in'
+                      : 'Need an account? Register',
+                ),
               ),
             ],
           ),
@@ -157,22 +227,76 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 }
 
-class SignedInScreen extends StatefulWidget {
-  const SignedInScreen({super.key, required this.auth, required this.user});
+class ProfileGate extends StatefulWidget {
+  const ProfileGate({super.key, required this.auth, required this.user});
 
   final AuthService auth;
   final User user;
 
   @override
-  State<SignedInScreen> createState() => _SignedInScreenState();
+  State<ProfileGate> createState() => _ProfileGateState();
 }
 
-class _SignedInScreenState extends State<SignedInScreen> {
+class _ProfileGateState extends State<ProfileGate> {
+  final _formKey = GlobalKey<FormState>();
+  final _firstName = TextEditingController();
+  final _lastName = TextEditingController();
+
+  late Future<bool> _profileCheck;
+  bool _saving = false;
   bool _signingOut = false;
   String? _error;
 
+  @override
+  void initState() {
+    super.initState();
+    _profileCheck = widget.auth.hasUserRecord(widget.user.uid);
+  }
+
+  @override
+  void dispose() {
+    _firstName.dispose();
+    _lastName.dispose();
+    super.dispose();
+  }
+
+  void _retryCheck() {
+    setState(() {
+      _error = null;
+      _profileCheck = widget.auth.hasUserRecord(widget.user.uid);
+    });
+  }
+
+  Future<void> _saveProfile() async {
+    if (_saving || _signingOut || !_formKey.currentState!.validate()) return;
+
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+
+    try {
+      await widget.auth.completeProfile(
+        firstName: _firstName.text,
+        lastName: _lastName.text,
+      );
+
+      if (!mounted) return;
+      _retryCheck();
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _error =
+            'Your account is signed in, but the profile could not be '
+            'confirmed. Check your connection and try saving again.';
+      });
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
   Future<void> _signOut() async {
-    if (_signingOut) return;
+    if (_saving || _signingOut) return;
 
     setState(() {
       _signingOut = true;
@@ -189,30 +313,104 @@ class _SignedInScreenState extends State<SignedInScreen> {
     }
   }
 
+  String? _validateName(String? value) {
+    final name = value?.trim() ?? '';
+    if (name.isEmpty) return 'Enter your name.';
+    if (name.length > 80) return 'Use at most 80 characters.';
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Message Board Vault')),
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(24),
-          children: [
-            Text('Signed in as ${widget.user.email ?? 'a board member'}'),
-            const SizedBox(height: 12),
-            const Text('Your message board will appear here.'),
-            if (_error case final message?)
-              Padding(
-                padding: const EdgeInsets.only(top: 12),
-                child: Text(message),
-              ),
-            const SizedBox(height: 24),
-            OutlinedButton(
-              onPressed: _signingOut ? null : _signOut,
-              child: Text(_signingOut ? 'Signing out…' : 'Sign out'),
+    return FutureBuilder<bool>(
+      future: _profileCheck,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        final profileExists = !snapshot.hasError && snapshot.data == true;
+
+        return Scaffold(
+          appBar: AppBar(
+            title: Text(
+              profileExists ? 'Message Board Vault' : 'Complete registration',
             ),
-          ],
-        ),
-      ),
+          ),
+          body: SafeArea(
+            child: Form(
+              key: _formKey,
+              child: ListView(
+                padding: const EdgeInsets.all(24),
+                children: [
+                  if (snapshot.hasError) ...[
+                    const Text(
+                      'Could not check your profile. Check your connection '
+                      'and try again.',
+                    ),
+                    OutlinedButton(
+                      onPressed: _retryCheck,
+                      child: const Text('Retry profile check'),
+                    ),
+                  ] else if (profileExists) ...[
+                    Text(
+                      'Signed in as ${widget.user.email ?? 'a board member'}',
+                    ),
+                    const SizedBox(height: 12),
+                    const Text('Your message board will appear here.'),
+                  ] else ...[
+                    const Text('Add your name to finish registration.'),
+                    const SizedBox(height: 16),
+                    TextFormField(
+                      controller: _firstName,
+                      enabled: !_saving && !_signingOut,
+                      decoration: const InputDecoration(
+                        labelText: 'First name',
+                      ),
+                      validator: _validateName,
+                    ),
+                    const SizedBox(height: 16),
+                    TextFormField(
+                      controller: _lastName,
+                      enabled: !_saving && !_signingOut,
+                      decoration: const InputDecoration(labelText: 'Last name'),
+                      validator: _validateName,
+                      onFieldSubmitted: (_) => _saveProfile(),
+                    ),
+                    const SizedBox(height: 20),
+                    FilledButton(
+                      onPressed: _saving || _signingOut ? null : _saveProfile,
+                      child: Text(
+                        _saving ? 'Saving profile…' : 'Finish registration',
+                      ),
+                    ),
+                  ],
+                  if (_error case final message?)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 12),
+                      child: Semantics(
+                        liveRegion: true,
+                        child: Text(
+                          message,
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.error,
+                          ),
+                        ),
+                      ),
+                    ),
+                  const SizedBox(height: 24),
+                  OutlinedButton(
+                    onPressed: _saving || _signingOut ? null : _signOut,
+                    child: Text(_signingOut ? 'Signing out…' : 'Sign out'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }
