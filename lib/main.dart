@@ -41,6 +41,8 @@ class _FirebaseStartupState extends State<FirebaseStartup> {
 
   static const _emulatorHost = String.fromEnvironment('FIREBASE_EMULATOR_HOST');
 
+  static const _localAppName = 'message-board-local';
+
   late Future<AuthService> _initialization;
 
   @override
@@ -56,17 +58,33 @@ class _FirebaseStartupState extends State<FirebaseStartup> {
       );
     }
 
-    if (Firebase.apps.isEmpty) {
-      if (_useEmulators) {
-        await Firebase.initializeApp(demoProjectId: 'demo-message-board');
-      } else {
-        await Firebase.initializeApp(
-          options: DefaultFirebaseOptions.currentPlatform,
-        );
-      }
+    final FirebaseApp app;
+
+    if (_useEmulators) {
+      final localAppExists = Firebase.apps.any(
+        (existing) => existing.name == _localAppName,
+      );
+
+      app = localAppExists
+          ? Firebase.app(_localAppName)
+          : await Firebase.initializeApp(
+              name: _localAppName,
+              demoProjectId: 'demo-message-board',
+            );
+    } else {
+      final defaultAppExists = Firebase.apps.any(
+        (existing) => existing.name == '[DEFAULT]',
+      );
+
+      app = defaultAppExists
+          ? Firebase.app()
+          : await Firebase.initializeApp(
+              options: DefaultFirebaseOptions.currentPlatform,
+            );
     }
 
     return AuthService.connect(
+      app: app,
       useEmulators: _useEmulators,
       emulatorHost: _emulatorHost,
     );
@@ -90,7 +108,7 @@ class _FirebaseStartupState extends State<FirebaseStartup> {
             appBar: AppBar(title: const Text('Message Board Vault')),
             body: SafeArea(
               child: Center(
-                child: Padding(
+                child: SingleChildScrollView(
                   padding: const EdgeInsets.all(24),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
@@ -105,12 +123,19 @@ class _FirebaseStartupState extends State<FirebaseStartup> {
                       const SizedBox(height: 12),
                       Text(
                         _useEmulators
-                            ? 'Check the emulator host configuration '
+                            ? 'Check the emulator configuration '
                                   'and try again.'
                             : 'Check the Firebase configuration '
                                   'and try again.',
                         textAlign: TextAlign.center,
                       ),
+                      if (kDebugMode) ...[
+                        const SizedBox(height: 16),
+                        SelectableText(
+                          'Startup diagnostic:\n${snapshot.error}',
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
                       const SizedBox(height: 20),
                       FilledButton(
                         onPressed: _retry,

@@ -1,12 +1,15 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
 
 import 'board_service.dart';
 
 class AuthService {
   AuthService(FirebaseAuth auth, {FirebaseFirestore? firestore})
     : _auth = auth,
-      board = BoardService(firestore ?? FirebaseFirestore.instance),
+      board = BoardService(
+        firestore ?? FirebaseFirestore.instanceFor(app: auth.app),
+      ),
       authStateChanges = auth.authStateChanges();
 
   final FirebaseAuth _auth;
@@ -16,22 +19,31 @@ class AuthService {
   User? get currentUser => _auth.currentUser;
 
   static Future<AuthService> connect({
+    required FirebaseApp app,
     required bool useEmulators,
     required String emulatorHost,
   }) async {
-    final auth = FirebaseAuth.instance;
-    final firestore = FirebaseFirestore.instance;
-
     if (useEmulators) {
       if (emulatorHost.trim().isEmpty) {
         throw ArgumentError('An emulator host address is required.');
       }
 
-      await auth.useAuthEmulator(emulatorHost, 9099);
-      firestore.useFirestoreEmulator(emulatorHost, 8080);
+      if (app.options.projectId != 'demo-message-board') {
+        throw StateError('Local emulator mode requires demo-message-board.');
+      }
+    }
 
-      // Keep local emulator data out of the persistent Firestore cache.
+    // Both services must use the exact app initialized at startup.
+    final auth = FirebaseAuth.instanceFor(app: app);
+    final firestore = FirebaseFirestore.instanceFor(app: app);
+
+    if (useEmulators) {
+      // Configure caching before connecting Firestore to its emulator.
       firestore.settings = const Settings(persistenceEnabled: false);
+
+      firestore.useFirestoreEmulator(emulatorHost.trim(), 8080);
+
+      await auth.useAuthEmulator(emulatorHost.trim(), 9099);
     }
 
     return AuthService(auth, firestore: firestore);
@@ -67,6 +79,7 @@ class AuthService {
     required String lastName,
   }) async {
     final user = currentUser;
+
     if (user == null) {
       throw StateError('Sign in before completing your profile.');
     }
