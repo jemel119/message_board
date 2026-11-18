@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'auth_service.dart';
 import 'board_message.dart';
 import 'board_service.dart';
+import 'permission_checks_screen.dart';
 
 class BoardScreen extends StatefulWidget {
   const BoardScreen({
@@ -119,6 +120,7 @@ class _BoardScreenState extends State<BoardScreen> {
         if (definitelyRejected || error is MessageCollision) {
           _draft = null;
         }
+
         _error = _errorMessage(error);
       });
     } finally {
@@ -210,12 +212,27 @@ class _BoardScreenState extends State<BoardScreen> {
     }
   }
 
+  void _openPermissionChecks() {
+    if (_busy || _draft != null || !_currentUser) return;
+
+    Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => PermissionChecksScreen(auth: widget.auth),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Message Board Vault'),
         actions: [
+          IconButton(
+            tooltip: 'Assignment permission checks',
+            onPressed: _busy || _draft != null ? null : _openPermissionChecks,
+            icon: const Icon(Icons.policy_outlined),
+          ),
           TextButton(
             onPressed: _busy || _draft != null ? null : _signOut,
             child: Text(_signingOut ? 'Signing out…' : 'Sign out'),
@@ -291,6 +308,7 @@ class _BoardScreenState extends State<BoardScreen> {
                   }
 
                   final messages = snapshot.requireData;
+
                   if (messages.isEmpty) {
                     return const Center(
                       child: Text('No messages yet. Start the conversation.'),
@@ -403,8 +421,12 @@ class _EditMessageDialogState extends State<_EditMessageDialog> {
           decoration: const InputDecoration(labelText: 'Message'),
           validator: (value) {
             final text = value?.trim() ?? '';
+
             if (text.isEmpty) return 'Enter a message.';
-            if (text.length > 1000) return 'Use at most 1,000 characters.';
+            if (text.length > 1000) {
+              return 'Use at most 1,000 characters.';
+            }
+
             return null;
           },
         ),

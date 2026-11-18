@@ -2,6 +2,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import 'auth_service.dart';
+import 'permission_checks_screen.dart';
 import 'profile_gate.dart';
 
 class AuthGate extends StatelessWidget {
@@ -106,7 +107,9 @@ class _LoginScreenState extends State<LoginScreen> {
           'too-many-requests' => 'Too many attempts. Wait before trying again.',
           'invalid-email' => 'Enter a valid email address.',
           'weak-password' => 'Choose a stronger password.',
-          'email-already-in-use' => 'Registration could not finish. Try signing in or use another email.',
+          'email-already-in-use' =>
+            'Registration could not finish. '
+                'Try signing in or use another email.',
           'invalid-credential' || 'wrong-password' || 'user-not-found' =>
             'Unable to sign in. Check your email and password.',
           _ => 'Authentication is unavailable. Please try again.',
@@ -114,6 +117,7 @@ class _LoginScreenState extends State<LoginScreen> {
       });
     } catch (_) {
       if (!mounted) return;
+
       setState(() {
         _error = 'Authentication is unavailable. Please try again.';
       });
@@ -122,10 +126,29 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  void _openPermissionChecks() {
+    if (_submitting) return;
+
+    Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => PermissionChecksScreen(auth: widget.auth),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(_registering ? 'Create account' : 'Sign in')),
+      appBar: AppBar(
+        title: Text(_registering ? 'Create account' : 'Sign in'),
+        actions: [
+          IconButton(
+            tooltip: 'Assignment permission checks',
+            onPressed: _submitting ? null : _openPermissionChecks,
+            icon: const Icon(Icons.policy_outlined),
+          ),
+        ],
+      ),
       body: SafeArea(
         child: Form(
           key: _formKey,
@@ -145,6 +168,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 decoration: const InputDecoration(labelText: 'Email'),
                 validator: (value) {
                   final email = value?.trim() ?? '';
+
                   return RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(email)
                       ? null
                       : 'Enter a valid email address.';
@@ -162,9 +186,11 @@ class _LoginScreenState extends State<LoginScreen> {
                   if (value == null || value.isEmpty) {
                     return 'Enter your password.';
                   }
+
                   if (_registering && value.length < 6) {
                     return 'Use at least 6 characters.';
                   }
+
                   return null;
                 },
                 onFieldSubmitted: (_) {
@@ -186,6 +212,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     if (value == null || value.isEmpty) {
                       return 'Confirm your password.';
                     }
+
                     return value == _password.text
                         ? null
                         : 'Passwords must match.';
