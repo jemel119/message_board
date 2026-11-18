@@ -1,5 +1,5 @@
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'auth_gate.dart';
@@ -36,6 +36,11 @@ class FirebaseStartup extends StatefulWidget {
 }
 
 class _FirebaseStartupState extends State<FirebaseStartup> {
+  static const _useEmulators =
+      kDebugMode && bool.fromEnvironment('USE_FIREBASE_EMULATORS');
+
+  static const _emulatorHost = String.fromEnvironment('FIREBASE_EMULATOR_HOST');
+
   late Future<AuthService> _initialization;
 
   @override
@@ -45,10 +50,26 @@ class _FirebaseStartupState extends State<FirebaseStartup> {
   }
 
   Future<AuthService> _initialize() async {
-    await Firebase.initializeApp(
-      options: DefaultFirebaseOptions.currentPlatform,
+    if (_useEmulators && _emulatorHost.trim().isEmpty) {
+      throw StateError(
+        'Set FIREBASE_EMULATOR_HOST when enabling local emulator mode.',
+      );
+    }
+
+    if (Firebase.apps.isEmpty) {
+      if (_useEmulators) {
+        await Firebase.initializeApp(demoProjectId: 'demo-message-board');
+      } else {
+        await Firebase.initializeApp(
+          options: DefaultFirebaseOptions.currentPlatform,
+        );
+      }
+    }
+
+    return AuthService.connect(
+      useEmulators: _useEmulators,
+      emulatorHost: _emulatorHost,
     );
-    return AuthService(FirebaseAuth.instance);
   }
 
   void _retry() {
@@ -82,8 +103,12 @@ class _FirebaseStartupState extends State<FirebaseStartup> {
                         textAlign: TextAlign.center,
                       ),
                       const SizedBox(height: 12),
-                      const Text(
-                        'Check the Firebase configuration and try again.',
+                      Text(
+                        _useEmulators
+                            ? 'Check the emulator host configuration '
+                                  'and try again.'
+                            : 'Check the Firebase configuration '
+                                  'and try again.',
                         textAlign: TextAlign.center,
                       ),
                       const SizedBox(height: 20),
@@ -99,7 +124,25 @@ class _FirebaseStartupState extends State<FirebaseStartup> {
           );
         }
 
-        return AuthGate(auth: snapshot.requireData);
+        return Column(
+          children: [
+            if (_useEmulators)
+              const Material(
+                color: Color(0xFFFFE0B2),
+                child: SafeArea(
+                  bottom: false,
+                  child: Padding(
+                    padding: EdgeInsets.all(8),
+                    child: Text(
+                      'LOCAL TEST — demo-message-board',
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                ),
+              ),
+            Expanded(child: AuthGate(auth: snapshot.requireData)),
+          ],
+        );
       },
     );
   }
