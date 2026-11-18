@@ -6,11 +6,11 @@ import 'board_service.dart';
 class AuthService {
   AuthService(FirebaseAuth auth)
     : _auth = auth,
-      _board = BoardService(FirebaseFirestore.instance),
+      board = BoardService(FirebaseFirestore.instance),
       authStateChanges = auth.authStateChanges();
 
   final FirebaseAuth _auth;
-  final BoardService _board;
+  final BoardService board;
   final Stream<User?> authStateChanges;
 
   User? get currentUser => _auth.currentUser;
@@ -37,7 +37,7 @@ class AuthService {
   }
 
   Future<bool> hasUserRecord(String uid) {
-    return _board.hasUserRecord(uid);
+    return board.hasUserRecord(uid);
   }
 
   Future<void> completeProfile({
@@ -49,7 +49,7 @@ class AuthService {
       throw StateError('Sign in before completing your profile.');
     }
 
-    await _board.saveUserRecord(
+    await board.saveUserRecord(
       uid: user.uid,
       firstName: firstName,
       lastName: lastName,
