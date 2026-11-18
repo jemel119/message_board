@@ -23,9 +23,7 @@ class BoardScreen extends StatefulWidget {
 
 class _BoardScreenState extends State<BoardScreen> {
   final _text = TextEditingController();
-
   late final Stream<List<BoardMessage>> _messages;
-  late final Future<String> _authorName;
 
   MessageDraft? _draft;
   bool _posting = false;
@@ -42,7 +40,6 @@ class _BoardScreenState extends State<BoardScreen> {
   void initState() {
     super.initState();
     _messages = widget.board.messageBoard();
-    _authorName = widget.board.authorName(widget.uid);
   }
 
   @override
@@ -64,18 +61,27 @@ class _BoardScreenState extends State<BoardScreen> {
         _ => 'The action could not be confirmed. Please retry.',
       };
     }
+
     if (error is MessageCollision) {
       return 'This message ID contains different data. '
           'The existing message was preserved.';
     }
-    if (error is ArgumentError) {
-      return error.message.toString();
-    }
+
+    if (error is ArgumentError) return error.message.toString();
+
     return 'The action could not be confirmed. Please retry.';
   }
 
   Future<void> _post() async {
     if (_busy || !_currentUser) return;
+
+    if (_draft == null &&
+        (_text.text.trim().isEmpty || _text.text.trim().length > 1000)) {
+      setState(() {
+        _error = 'Enter a message containing 1 to 1,000 characters.';
+      });
+      return;
+    }
 
     setState(() {
       _posting = true;
@@ -84,7 +90,7 @@ class _BoardScreenState extends State<BoardScreen> {
 
     try {
       if (_draft == null) {
-        final name = await _authorName;
+        final name = await widget.board.authorName(widget.uid);
         if (!_currentUser) return;
 
         _draft = widget.board.newDraft(
@@ -103,7 +109,18 @@ class _BoardScreenState extends State<BoardScreen> {
       });
     } catch (error) {
       if (!_currentUser) return;
-      setState(() => _error = _errorMessage(error));
+
+      final definitelyRejected =
+          error is FirebaseException &&
+          (error.code == 'permission-denied' ||
+              error.code == 'unauthenticated');
+
+      setState(() {
+        if (definitelyRejected || error is MessageCollision) {
+          _draft = null;
+        }
+        _error = _errorMessage(error);
+      });
     } finally {
       if (_currentUser) setState(() => _posting = false);
     }
@@ -112,49 +129,10 @@ class _BoardScreenState extends State<BoardScreen> {
   Future<void> _edit(BoardMessage message) async {
     if (_busy || !_currentUser || message.authorUid != widget.uid) return;
 
-    final controller = TextEditingController(text: message.text);
-    final formKey = GlobalKey<FormState>();
-
     final updated = await showDialog<String>(
       context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Edit message'),
-          content: Form(
-            key: formKey,
-            child: TextFormField(
-              controller: controller,
-              autofocus: true,
-              minLines: 2,
-              maxLines: 6,
-              maxLength: 1000,
-              decoration: const InputDecoration(labelText: 'Message'),
-              validator: (value) => value == null || value.trim().isEmpty
-                  ? 'Enter a message.'
-                  : null,
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () {
-                if (formKey.currentState!.validate()) {
-                  Navigator.pop(context, controller.text);
-                }
-              },
-              child: const Text('Save'),
-            ),
-          ],
-        );
-      },
+      builder: (_) => _EditMessageDialog(initialText: message.text),
     );
-
-    // Wait for the dialog route to finish before disposing its controller.
-    await Future<void>.delayed(const Duration(milliseconds: 300));
-    controller.dispose();
 
     if (updated == null || !_currentUser || _busy) return;
 
@@ -275,8 +253,8 @@ class _BoardScreenState extends State<BoardScreen> {
                   ),
                   if (_draft != null && !_posting)
                     const Text(
-                      'This draft is retained until posting is confirmed. '
-                      'Retry uses the same message ID.',
+                      'Posting is unconfirmed. Retry uses the same message ID. '
+                      'Sign-out is paused until this draft is resolved.',
                     ),
                   if (_error case final message?)
                     Semantics(
@@ -381,6 +359,70 @@ class _BoardScreenState extends State<BoardScreen> {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _EditMessageDialog extends StatefulWidget {
+  const _EditMessageDialog({required this.initialText});
+
+  final String initialText;
+
+  @override
+  State<_EditMessageDialog> createState() => _EditMessageDialogState();
+}
+
+class _EditMessageDialogState extends State<_EditMessageDialog> {
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialText);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Edit message'),
+      content: Form(
+        key: _formKey,
+        child: TextFormField(
+          controller: _controller,
+          autofocus: true,
+          minLines: 2,
+          maxLines: 6,
+          maxLength: 1000,
+          decoration: const InputDecoration(labelText: 'Message'),
+          validator: (value) {
+            final text = value?.trim() ?? '';
+            if (text.isEmpty) return 'Enter a message.';
+            if (text.length > 1000) return 'Use at most 1,000 characters.';
+            return null;
+          },
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () {
+            if (_formKey.currentState!.validate()) {
+              Navigator.pop(context, _controller.text);
+            }
+          },
+          child: const Text('Save'),
+        ),
+      ],
     );
   }
 }
